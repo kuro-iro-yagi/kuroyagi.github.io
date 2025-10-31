@@ -1,0 +1,11 @@
+# ===========================
+# Web crawler exclusion rules
+# ===========================
+User-agent: *
+Disallow: /
+
+# Allow GitHub’s own crawler for internal indexing only
+User-agent: Github.com
+Disallow:
+
+# End of file
