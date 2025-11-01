@@ -2,18 +2,17 @@
 """
 VRChatギャラリー用 生成スクリプト（Windows 11 / Python 3.x）
 - gallery/full_pc/*.png を入力に
-  - gallery/full_mobile/ に縮小コピーを生成（既定: 長辺 1280 px）
+  - 先に full_pc 内のファイルを 3桁連番（001.png, 002.png, ...）へリネーム
+  - gallery/full_mobile/ に縮小コピーを生成（既定: 長辺 1024 px）
   - 4x4=16枚のサムネセルからアトラス thumbs_page_XXXX.jpg を生成
-  - list.json を生成（atlas と items[ full_pc / full_mobile / caption ]）
 - サムネセルはアスペクト比を保持し、余白でレターボックス（崩れない）
 
 使い方:
-    py generate_gallery.py --user <github_username> [--cell 256x144] [--grid 4x4]
-                           [--mobile-max 1280] [--ext png] [--base-url <url>]
+    py generate_gallery.py [--cell 256x144] [--grid 4x4]
+                           [--mobile-max 1024] [--ext png]
 """
 from __future__ import annotations
 import argparse
-import json
 from pathlib import Path
 from PIL import Image
 
@@ -23,38 +22,25 @@ DEFAULT_CELL_H = 144        # サムネセルの高さ（16:9を想定。正方�
 DEFAULT_GRID_COLS = 4       # アトラス列数
 DEFAULT_GRID_ROWS = 4       # アトラス行数
 DEFAULT_MOBILE_MAX = 1024   # モバイル向け縮小の長辺 px
-DEFAULT_EXT = "png"         # 出力拡張子（full_pc は入力のまま。full_mobile は既定 png）
+DEFAULT_EXT = "png"         # full_mobile の出力拡張子
 # ---------------------------------------------------------------------
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Generate atlas thumbnails and list.json for VRChat gallery.")
-    p.add_argument("--user", required=False, help="GitHubユーザー名（例: kuroyagi）。指定がなければ相対URLにする。")
-    p.add_argument("--base-url", default=None,
-                   help="ベースURLを直接指定（例: https://<user>.github.io/gallery/）。指定があれば優先。")
+    p = argparse.ArgumentParser(description="Generate atlas thumbnails for VRChat gallery (no json).")
     p.add_argument("--cell", default=f"{DEFAULT_CELL_W}x{DEFAULT_CELL_H}",
                    help="サムネセルのサイズ（例: 256x144 または 256x256）")
     p.add_argument("--grid", default=f"{DEFAULT_GRID_COLS}x{DEFAULT_GRID_ROWS}",
                    help="アトラスのグリッド（例: 4x4）")
     p.add_argument("--mobile-max", type=int, default=DEFAULT_MOBILE_MAX,
-                   help="full_mobile の長辺上限 px（既定 1280）")
+                   help="full_mobile の長辺上限 px（既定 1024）")
     p.add_argument("--ext", default=DEFAULT_EXT, choices=["png", "jpg", "jpeg"],
                    help="full_mobile の出力拡張子（既定 png）")
-    p.add_argument("--caption", default="filename",
-                   choices=["filename", "none"],
-                   help="caption の埋め方: filename=ファイル名(拡張子除く) / none=空文字")
     return p.parse_args()
 
 def ensure_dirs(gallery_dir: Path):
     (gallery_dir / "full_mobile").mkdir(parents=True, exist_ok=True)
 
-# def list_full_pc_images(full_pc_dir: Path) -> list[Path]:
-#     files = []
-#     for ext in ("*.png", "*.PNG"):
-#         files.extend(sorted(full_pc_dir.glob(ext)))
-#     return files
-
 def list_full_pc_images(full_pc_dir: Path) -> list[Path]:
-    # 小文字 *.png のみを対象にし、念のため大小文字無視で重複排除
     files = sorted(full_pc_dir.glob("*.png"))
     seen = set()
     unique = []
@@ -66,6 +52,34 @@ def list_full_pc_images(full_pc_dir: Path) -> list[Path]:
         unique.append(p)
     return unique
 
+def rename_full_pc_sequential(full_pc_dir: Path, digits: int = 3) -> list[Path]:
+    """
+    full_pc 内の *.png を 3桁連番に統一（001.png, 002.png, ...）
+    衝突回避のため一時名へ退避→最終名へ確定の二段階。
+    戻り値は最終ファイルパスの昇順リスト。
+    """
+    files = list_full_pc_images(full_pc_dir)
+    if not files:
+        return []
+
+    # 一時退避名へ
+    temp_paths = []
+    for i, src in enumerate(files, start=1):
+        tmp = src.with_name(f"__tmp_renaming_{i:06d}.png")
+        src.rename(tmp)
+        temp_paths.append(tmp)
+
+    # 最終名へ
+    final_paths = []
+    for i, tmp in enumerate(sorted(temp_paths), start=1):
+        dst = full_pc_dir / f"{i:0{digits}d}.png"
+        if dst.exists():
+            dst.unlink()
+        tmp.rename(dst)
+        final_paths.append(dst)
+
+    return final_paths
+
 def resize_with_aspect(im: Image.Image, max_w: int, max_h: int) -> Image.Image:
     w, h = im.size
     scale = min(max_w / w, max_h / h)
@@ -73,7 +87,6 @@ def resize_with_aspect(im: Image.Image, max_w: int, max_h: int) -> Image.Image:
     return im.resize((new_w, new_h), Image.LANCZOS)
 
 def make_letterboxed_thumb(src: Image.Image, cell_w: int, cell_h: int, bg=(0, 0, 0)) -> Image.Image:
-    # アスペクト保持でセルに収め、足りない側は余白（レターボックス）
     thumb = Image.new("RGB", (cell_w, cell_h), bg)
     fit = resize_with_aspect(src, cell_w, cell_h)
     x = (cell_w - fit.width) // 2
@@ -111,29 +124,16 @@ def main():
 
     ensure_dirs(gallery_dir)
 
-    # ベースURL（完全URL推奨）。--base-url が最優先。--user があれば https://<user>.github.io/gallery/
-    if args.base_url:
-        base_url = args.base_url.rstrip("/") + "/"
-    elif args.user:
-        base_url = f"https://{args.user}.github.io/gallery/"
-    else:
-        # 相対URLも動くけれど、VRChatでは完全URL推奨。必要なら --user か --base-url を指定してね。
-        base_url = "./gallery/"
-
-    # 対象ファイルを収集
-    inputs = list_full_pc_images(full_pc_dir)
-    if not inputs:
+    # 0) 連番リネーム（3桁）
+    renamed = rename_full_pc_sequential(full_pc_dir, digits=3)
+    if not renamed:
         print(f"[!] 入力が見つからないわ: {full_pc_dir}\\*.png を用意してね")
         return
 
-    items = []          # list.json用の全アイテム
-    atlas_pages = []    # 生成したアトラスのファイル名（URL）
-
     # 1) full_mobile 生成 + サムネセル生成
     thumbs_cells: list[Image.Image] = []
-    for idx, src_path in enumerate(inputs, start=1):
-        stem = src_path.stem  # 例: 0001
-        # full_mobile
+    for src_path in renamed:
+        stem = src_path.stem  # 例: 001
         with Image.open(src_path) as im:
             im = im.convert("RGBA") if im.mode in ("LA", "RGBA", "P") else im.convert("RGB")
             # 長辺 args.mobile_max で縮小（拡大はしない）
@@ -154,45 +154,20 @@ def main():
             cell = make_letterboxed_thumb(im, cell_w, cell_h, bg=(0, 0, 0))
             thumbs_cells.append(cell)
 
-        # list.json の1件（caption はファイル名 or 空）
-        if args.caption == "filename":
-            caption = stem
-        else:
-            caption = ""
-
-        items.append({
-            "id": idx,
-            "caption": caption,
-            "full_pc":     f"{base_url}full_pc/{stem}.png",
-            "full_mobile": f"{base_url}full_mobile/{mobile_name}"
-        })
-
     # 2) アトラス生成（16枚/ページ）
     per_page = cols * rows
+    atlas_count = 0
     for page_idx in range(0, len(thumbs_cells), per_page):
         page_cells = thumbs_cells[page_idx:page_idx + per_page]
         atlas = build_atlas(page_cells, cols, rows, cell_w, cell_h)
         atlas_name = f"thumbs_page_{(page_idx // per_page + 1):04d}.jpg"
         atlas_path = gallery_dir / atlas_name
         save_image(atlas, atlas_path, "jpg")
-        atlas_pages.append(atlas_name)
+        atlas_count += 1
 
-    # 3) list.json を組み立て（pages[]）
-    pages = []
-    for p, atlas_name in enumerate(atlas_pages, start=1):
-        start = (p - 1) * per_page
-        end = min(p * per_page, len(items))
-        page_items = items[start:end]
-        pages.append({
-            "atlas": f"{base_url}{atlas_name}",
-            "items": page_items
-        })
-
-    manifest = {"pages": pages}
-    out_path = gallery_dir / "list.json"
-    out_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[OK] list.json を出力: {out_path}")
-    print(f"[OK] アトラス {len(atlas_pages)} 枚、full_mobile {len(items)} 枚 生成したわ。")
+    print(f"[OK] 連番リネーム: {len(renamed)} 枚（001.png〜）完了したわ。")
+    print(f"[OK] アトラス {atlas_count} 枚、full_mobile {len(renamed)} 枚を生成したの。")
+#    print(f"[NOTE] list.json の生成は行っていないわ。必要なら別途スクリプトで作ってね。")
 
 if __name__ == "__main__":
     main()

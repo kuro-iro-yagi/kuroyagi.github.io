@@ -6,7 +6,7 @@
 ```pip install pillow```
 # スクリプトを実行
 ```
-py generate_gallery.py --base-url "https://kuro-iro-yagi.github.io/kuroyagi.github.io/gallery/"
+py generate_gallery.py"
 ```
 # 仮想環境を無効化
 ```deactivate```
