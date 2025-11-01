@@ -22,7 +22,7 @@ DEFAULT_CELL_W = 256        # サムネセルの幅（アトラス内の1マス�
 DEFAULT_CELL_H = 144        # サムネセルの高さ（16:9を想定。正方形なら 256 に）
 DEFAULT_GRID_COLS = 4       # アトラス列数
 DEFAULT_GRID_ROWS = 4       # アトラス行数
-DEFAULT_MOBILE_MAX = 1280   # モバイル向け縮小の長辺 px
+DEFAULT_MOBILE_MAX = 1024   # モバイル向け縮小の長辺 px
 DEFAULT_EXT = "png"         # 出力拡張子（full_pc は入力のまま。full_mobile は既定 png）
 # ---------------------------------------------------------------------
 
@@ -47,11 +47,24 @@ def parse_args():
 def ensure_dirs(gallery_dir: Path):
     (gallery_dir / "full_mobile").mkdir(parents=True, exist_ok=True)
 
+# def list_full_pc_images(full_pc_dir: Path) -> list[Path]:
+#     files = []
+#     for ext in ("*.png", "*.PNG"):
+#         files.extend(sorted(full_pc_dir.glob(ext)))
+#     return files
+
 def list_full_pc_images(full_pc_dir: Path) -> list[Path]:
-    files = []
-    for ext in ("*.png", "*.PNG"):
-        files.extend(sorted(full_pc_dir.glob(ext)))
-    return files
+    # 小文字 *.png のみを対象にし、念のため大小文字無視で重複排除
+    files = sorted(full_pc_dir.glob("*.png"))
+    seen = set()
+    unique = []
+    for p in files:
+        key = p.name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(p)
+    return unique
 
 def resize_with_aspect(im: Image.Image, max_w: int, max_h: int) -> Image.Image:
     w, h = im.size
