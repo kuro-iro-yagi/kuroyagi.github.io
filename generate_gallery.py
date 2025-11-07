@@ -128,11 +128,19 @@ def make_letterboxed_thumb(src: Image.Image, cell_w: int, cell_h: int, bg=ATLAS_
     base.paste(fit, (x, y))
     return base
 
-def save_jpeg(im: Image.Image, path: Path):
+def save_jpeg(im: Image.Image, path: Path, quality: int = 98):
     path.parent.mkdir(parents=True, exist_ok=True)
     if im.mode not in ("RGB", "L"):
         im = im.convert("RGB")
-    im.save(path, format="JPEG", quality=90, optimize=True, progressive=True)
+    # 画質最優先設定
+    im.save(
+        path,
+        format="JPEG",
+        quality=quality,     # 推奨: 95〜98（既定は96に）
+        subsampling=0,       # 4:4:4（色劣化を抑える）
+        optimize=True,       # ファイルサイズだけに効く（画質は不変）
+        progressive=True     # 表示の段階描画。画質は不変
+    )
 
 def build_atlas(thumbs: list[Image.Image], cols: int, rows: int, cell_w: int, cell_h: int) -> Image.Image:
     atlas = Image.new("RGB", (cols * cell_w, rows * cell_h), ATLAS_BG)
