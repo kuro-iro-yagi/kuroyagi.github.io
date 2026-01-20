@@ -6,7 +6,7 @@
 ```pip install pillow```
 # スクリプトを実行
 ```
-py generate_gallery.py"
+py generate_gallery.py
 ```
 # 仮想環境を無効化
 ```deactivate```
